@@ -153,7 +153,7 @@ After payment, return and confirm.
     elif data.startswith("approve_") and is_admin(user_id):
         target = int(data.split("_")[1])
         meeting_date = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d %H:%M')
-                vip_message = (
+        vip_message = f(
             "🎉 **Payment Confirmed Successfully**\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "👑 **VIP CONFIRMATION NOTICE**\n"
@@ -170,8 +170,7 @@ After payment, return and confirm.
             "Thank you for your trust. We look forward to delivering a premium experience.\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "Status: **CONFIRMED ✅**"
-    )
-
+        )
         await context.bot.send_message(chat_id=target, text=vip_message, parse_mode="Markdown")
         await query.edit_message_text("✅ Approved")
 
