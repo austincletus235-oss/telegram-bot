@@ -1,217 +1,143 @@
-import os
-from flask import Flask
-server = Flask(__name__)
-
-@server.route('/')
-def health_check():
-    return "Bot is alive!"
-    
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 import sqlite3
 from datetime import datetime, timedelta
+import os
+import threading
+from flask import Flask
 
-# ================= TOKEN =================
+# ================= RENDER SYSTEM =================
+server = Flask(__name__)
+@server.route('/')
+def health_check(): return "Alive", 200
+
+# ================= SETTINGS =================
 TOKEN = "8681446523:AAHs42JckBFG_n-OYsASEbv-6Q4eFUlE5tw"
-
-# ================= ADMIN =================
 ADMIN_IDS = [7936558915]
 
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
+def is_admin(user_id): return user_id in ADMIN_IDS
 
 # ================= DATABASE =================
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS bookings (
-    user_id INTEGER,
-    meeting_type TEXT,
-    reason TEXT,
-    price INTEGER,
-    status TEXT,
-    meeting_date TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS wallets (
-    coin TEXT PRIMARY KEY,
-    address TEXT
-)
-""")
-
+cursor.execute("CREATE TABLE IF NOT EXISTS bookings (user_id INTEGER, meeting_type TEXT, reason TEXT, price INTEGER, status TEXT, meeting_date TEXT)")
+cursor.execute("CREATE TABLE IF NOT EXISTS wallets (coin TEXT PRIMARY KEY, address TEXT, memo TEXT)")
 conn.commit()
 
-# ================= WALLET (FIXED FOR RENDER) =================
 def get_wallet(coin):
-    # 1. Check database first
-    cursor.execute("SELECT address FROM wallets WHERE coin=?", (coin,))
+    cursor.execute("SELECT address, memo FROM wallets WHERE coin=?", (coin,))
     row = cursor.fetchone()
-    if row:
-        return row[0]
-    
-    # 2. Hardcoded defaults so it is NEVER "NOT SET" on Render
-    defaults = {
-        "USDT": "UQBO80Ku-tQvQMd2nXltilpR8hZrBgn7B_0_JlGjujn4hWOr",
-        "BTC": "NOT SET",
-        "ETH": "NOT SET"
-    }
-    return defaults.get(coin.upper(), "NOT SET")
+    return row if row else ("NOT SET", None)
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🎯 Book Meeting", callback_data="book")]]
-
     if is_admin(update.effective_user.id):
         keyboard.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_panel")])
-
     await update.message.reply_text("Welcome 👋", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ================= CALLBACK =================
+# ================= CALLBACKS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = query.from_user.id
     data = query.data
 
-    # ================= COPY WALLET =================
-    if data.startswith("copy_"):
-        wallet = data.replace("copy_", "")
-        await query.answer(text="Tap and hold to copy ✅", show_alert=True)
-        await query.message.reply_text(wallet)
-        return
+    # ADMIN PANEL
+    if data == "admin_panel" and is_admin(user_id):
+        kb = [[InlineKeyboardButton("Edit BTC", callback_data="edit_BTC")],
+              [InlineKeyboardButton("Edit ETH", callback_data="edit_ETH")],
+              [InlineKeyboardButton("Edit USDT", callback_data="edit_USDT")]]
+        await query.edit_message_text("🛠 Admin: Select a wallet to edit/update:", reply_markup=InlineKeyboardMarkup(kb))
 
-    # ================= GUIDE =================
-    if data.startswith("guide_"):
+    elif data.startswith("edit_") and is_admin(user_id):
         coin = data.split("_")[1]
-        guide_text = f"📘 Crypto Payment Guide ({coin})\n\n1️⃣ Open wallet\n2️⃣ Select {coin}\n3️⃣ Paste address\n4️⃣ Send exact amount."
-        await query.message.reply_text(guide_text)
-        return
+        context.user_data["editing_coin"] = coin
+        await query.edit_message_text(f"Updating {coin}...\n\nSend the new address.\nFormat: `Address` or `Address,Memo` (with a comma).")
 
-    # ================= ADMIN PANEL =================
-    if data == "admin_panel":
-        if not is_admin(user_id):
-            await query.edit_message_text("❌ Unauthorized")
-            return
-        await query.edit_message_text("🛠 Admin Panel Active")
-        return
-
-    # ================= BOOKING LOGIC =================
-    if data == "book":
-        keyboard = [
-            [InlineKeyboardButton("Meet & Greet", callback_data="type_meet")],
-            [InlineKeyboardButton("Business", callback_data="type_business")]
-        ]
-        await query.edit_message_text("Choose meeting type:", reply_markup=InlineKeyboardMarkup(keyboard))
+    # BOOKING LOGIC
+    elif data == "book":
+        kb = [[InlineKeyboardButton("Meet & Greet ($15k)", callback_data="type_meet")],
+              [InlineKeyboardButton("Business ($20k)", callback_data="type_business")]]
+        await query.edit_message_text("Choose meeting type:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif data in ["type_meet", "type_business"]:
-        meeting_type = "Meet & Greet" if data == "type_meet" else "Business"
-        context.user_data["meeting_type"] = meeting_type
+        context.user_data["meeting_type"] = "Meet & Greet" if data == "type_meet" else "Business"
         context.user_data["step"] = "reason"
-        await query.edit_message_text(f"Selected: {meeting_type}\n\nSend your reason for the meeting:")
+        await query.edit_message_text("Send your reason for the meeting:")
 
-    # ================= PAYMENT SELECTION =================
+    # PAYMENT GUIDE
+    elif data.startswith("guide_"):
+        coin = data.split("_")[1]
+        guide = f"📘 {coin} Guide\n\n1️⃣ Open Wallet\n2️⃣ Select {coin}\n3️⃣ Paste Address\n4️⃣ Confirm exact amount.\n\nEnsure network matches!"
+        await query.message.reply_text(guide)
+
+    # INVOICE & WALLET DISPLAY
     elif data.startswith("pay_"):
         coin = data.split("_")[1]
-        wallet = get_wallet(coin)
-        meeting_type = context.user_data.get("meeting_type", "Meet & Greet")
-        price = 15000 if meeting_type == "Meet & Greet" else 20000
+        m_type = context.user_data.get("meeting_type", "Meet & Greet")
+        price = 15000 if m_type == "Meet & Greet" else 20000
+        addr, memo = get_wallet(coin)
+        memo_text = f"\n📝 Memo/Tag: {memo}" if memo else ""
+        
+        kb = [[InlineKeyboardButton("📘 Payment Guide", callback_data=f"guide_{coin}")],
+              [InlineKeyboardButton("✅ Confirm Payment", callback_data="confirm_payment")]]
+        
+        await query.message.reply_text(f"🧾 Invoice\nType: {m_type}\nAmount: ${price}\nCoin: {coin}\n\n📍 Address: {addr}{memo_text}", 
+            reply_markup=InlineKeyboardMarkup(kb))
 
-        keyboard = [
-            [InlineKeyboardButton("📋 Copy Wallet", callback_data=f"copy_{wallet}")],
-            [InlineKeyboardButton("📘 Payment Guide", callback_data=f"guide_{coin}")],
-            [InlineKeyboardButton("✅ Confirm Payment", callback_data="confirm_payment")]
-        ]
-
-        await query.message.reply_text(
-            f"🧾 Invoice\n\nType: {meeting_type}\nAmount: ${price}\nCoin: {coin}\n\n📥 Wallet:\n{wallet}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    # ================= CONFIRMATION =================
     elif data == "confirm_payment":
-        meeting_type = context.user_data.get("meeting_type", "Meet & Greet")
-        price = 15000 if meeting_type == "Meet & Greet" else 20000
-
-        for admin_id in ADMIN_IDS:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"🧾 Payment Pending\nUser: {user_id}\nType: {meeting_type}\nAmount: ${price}",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")],
-                    [InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}")]
-                ])
-            )
+        m_type = context.user_data.get("meeting_type", "Meet & Greet")
+        for admin in ADMIN_IDS:
+            await context.bot.send_message(chat_id=admin, text=f"🧾 Payment Alert: {user_id}\nType: {m_type}", 
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")]]))
         await query.edit_message_text("⏳ Awaiting admin approval...")
 
-    # ================= APPROVAL =================
-    elif data.startswith("approve_"):
-        if not is_admin(user_id): return
-        target_user = int(data.split("_")[1])
-        meeting_date = datetime.now() + timedelta(days=5)
-        await context.bot.send_message(
-            chat_id=target_user,
-            text=f"🎉 Payment Confirmed!\nMeeting Date: {meeting_date.strftime('%Y-%m-%d %H:%M')}\n\nYour VIP Fan Card will be shipped in 2 days."
-        )
+    # APPROVAL SYSTEM
+    elif data.startswith("approve_") and is_admin(user_id):
+        target = int(data.split("_")[1])
+        date = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d %H:%M')
+        await context.bot.send_message(chat_id=target, text=(
+            "🎉 Payment Confirmed Successfully\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "👑 VIP CONFIRMATION NOTICE\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "Dear User, your payment has been verified.\n"
+            f"📅 Meeting with Morgan Wallen: {date}\n\n"
+            "🎫 A VIP Fan Recognition Card will be shipped within 2 days.\n"
+            "Status: CONFIRMED ✅"
+        ))
         await query.edit_message_text("✅ Approved")
-
-    elif data.startswith("reject_"):
-        if not is_admin(user_id): return
-        target_user = int(data.split("_")[1])
-        await context.bot.send_message(target_user, "❌ Payment rejected.")
-        await query.edit_message_text("❌ Rejected")
 
 # ================= TEXT HANDLER =================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("step") == "reason":
-        meeting_type = context.user_data.get("meeting_type")
-        price = 15000 if meeting_type == "Meet & Greet" else 20000
-        
-        cursor.execute("INSERT INTO bookings (user_id, meeting_type, reason, price, status) VALUES (?, ?, ?, ?, ?)",
-                       (update.effective_user.id, meeting_type, update.message.text, price, "pending"))
-        conn.commit()
-        context.user_data["step"] = None
+    user_id = update.effective_user.id
+    text = update.message.text
 
-        keyboard = [
-            [InlineKeyboardButton("BTC", callback_data="pay_BTC")],
-            [InlineKeyboardButton("ETH", callback_data="pay_ETH")],
-            [InlineKeyboardButton("USDT", callback_data="pay_USDT")]
-        ]
-        await update.message.reply_text(f"Amount: ${price}\nChoose payment method:", reply_markup=InlineKeyboardMarkup(keyboard))
+    if is_admin(user_id) and context.user_data.get("editing_coin"):
+        coin = context.user_data["editing_coin"]
+        parts = text.split(",")
+        addr = parts[0].strip()
+        memo = parts[1].strip() if len(parts) > 1 else None
+        cursor.execute("INSERT OR REPLACE INTO wallets (coin, address, memo) VALUES (?, ?, ?)", (coin, addr, memo))
+        conn.commit()
+        context.user_data["editing_coin"] = None
+        await update.message.reply_text(f"✅ {coin} Updated!\nAddr: {addr}\nMemo: {memo if memo else 'None'}")
+
+    elif context.user_data.get("step") == "reason":
+        context.user_data["step"] = None
+        kb = [[InlineKeyboardButton("BTC", callback_data="pay_BTC")], 
+              [InlineKeyboardButton("ETH", callback_data="pay_ETH")], 
+              [InlineKeyboardButton("USDT", callback_data="pay_USDT")]]
+        await update.message.reply_text("Choose payment method:", reply_markup=InlineKeyboardMarkup(kb))
 
 # ================= RUN =================
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-print("Bot running...")
 if __name__ == "__main__":
-    import threading
-    import os
-
-    # 1. Function to run the Flask server
-    def run_flask():
-        # Render looks for port 10000 by default
-        port = int(os.environ.get("PORT", 10000))
-        print(f"--- Starting Flask Health Check on port {port} ---")
-        server.run(host='0.0.0.0', port=port)
-
-    # 2. Start Flask in a background thread first
-    # This ensures the port opens IMMEDIATELY for Render
-    threading.Thread(target=run_flask, daemon=True).start()
-
-    # 3. Start the bot in the MAIN thread
-    print("--- Bot is now starting in the main thread ---")
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    
+    def run_f(): server.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    threading.Thread(target=run_f, daemon=True).start()
     app.run_polling(drop_pending_updates=True)
-        
