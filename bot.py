@@ -1,3 +1,11 @@
+import os
+from flask import Flask
+server = Flask(__name__)
+
+@server.route('/')
+def health_check():
+    return "Bot is alive!"
+    
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -188,5 +196,12 @@ app.add_handler(CallbackQueryHandler(buttons))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 print("Bot running...")
-app.run_polling()
+if __name__ == "__main__":
+# 1. Start the bot (non-blocking)
+app.run_polling(drop_pending_updates=True, close_loop=False)
+    
+# 2. Start the Flask server Render is scanning for
+port = int(os.environ.get("PORT", 8000))
+server.run(host='0.0.0.0', port=port)
+        
     
