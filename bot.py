@@ -197,16 +197,21 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 print("Bot running...")
 if __name__ == "__main__":
-    # 1. Get the port Render wants (usually 10000)
-    port = int(os.environ.get("PORT", 10000))
-    
-    # 2. Start the bot in the background (Threading)
     import threading
-    print("Starting bot thread...")
-    bot_thread = threading.Thread(target=app.run_polling, kwargs={'drop_pending_updates': True})
-    bot_thread.start()
-    
-    # 3. Start Flask (This tells Render 'I am alive!')
-    print(f"Starting Flask server on port {port}...")
-    server.run(host='0.0.0.0', port=port)
+    import os
+
+    # 1. Function to run the Flask server
+    def run_flask():
+        # Render looks for port 10000 by default
+        port = int(os.environ.get("PORT", 10000))
+        print(f"--- Starting Flask Health Check on port {port} ---")
+        server.run(host='0.0.0.0', port=port)
+
+    # 2. Start Flask in a background thread first
+    # This ensures the port opens IMMEDIATELY for Render
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # 3. Start the bot in the MAIN thread
+    print("--- Bot is now starting in the main thread ---")
+    app.run_polling(drop_pending_updates=True)
         
