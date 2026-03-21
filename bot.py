@@ -50,7 +50,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("copy_"):
         val = data.replace("copy_", "")
         await query.message.reply_text(f"`{val}`", parse_mode="MarkdownV2")
-        await query.answer(text="Copied to clipboard ✅")
         return
 
     # ADMIN PANEL MAIN
@@ -91,18 +90,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # USER UI
     elif data.startswith("guide_"):
-         coin = data.split("_")[1]
-         guide_text = (
-         f"📘 **How to Pay with {coin}**\n\n"
-        "1️⃣ Open your crypto exchange or wallet app.\n"
-       f"2️⃣ Tap **Send** or **Withdraw** and choose **{coin}**.\n"
-        "3️⃣ Select the correct **Network** (Critical!).\n"
-        "4️⃣ Paste the exact Wallet Address from your invoice.\n"
-        "5️⃣ Add the **Memo/Tag** (ONLY if your invoice shows one).\n"
-        "6️⃣ Enter the exact amount, cover any network fees, and send.\n\n"
-        "⚠️ **IMPORTANT:** Always double-check the network and address before confirming. Crypto transfers cannot be reversed."
-    )
-    await query.message.reply_text(guide_text, parse_mode="Markdown")
+        coin = data.split("_")[1]
+        guide_text = (
+            f"📘 **How to Pay with {coin}**\n\n"
+            "1️⃣ Open your crypto exchange or wallet app.\n"
+            f"2️⃣ Tap **Send** or **Withdraw** and choose **{coin}**.\n"
+            "3️⃣ Select the correct **Network** (Critical!).\n"
+            "4️⃣ Paste the exact Wallet Address from your invoice.\n"
+            "5️⃣ Add the **Memo/Tag** (ONLY if your invoice shows one).\n"
+            "6️⃣ Enter the exact amount, cover any network fees, and send.\n\n"
+            "⚠️ **IMPORTANT:** Always double-check the network and address before confirming. Crypto transfers cannot be reversed."
+        )
+        await query.message.reply_text(guide_text, parse_mode="Markdown")
 
     elif data == "book":
         kb = [[InlineKeyboardButton("Meet & Greet ($15k)", callback_data="type_meet")], [InlineKeyboardButton("Business ($20k)", callback_data="type_business")]]
@@ -193,6 +192,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    def run_f(): server.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    
+    def run_f(): 
+        server.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+        
     threading.Thread(target=run_f, daemon=True).start()
     app.run_polling(drop_pending_updates=True)
