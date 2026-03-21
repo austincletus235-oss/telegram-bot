@@ -91,9 +91,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # USER UI
     elif data.startswith("guide_"):
-        coin = data.split("_")[1]
-        guide_text = f"📘 **Crypto Payment Guide ({coin})**\n\n1️⃣ Open wallet\n2️⃣ Select {coin}\n3️⃣ Paste address\n4️⃣ Enter exact amount\n5️⃣ Confirm and send payment.\n\n⚠️ **IMPORTANT**: Ensure the network matches or funds will be lost."
-        await query.message.reply_text(guide_text, parse_mode="Markdown")
+         coin = data.split("_")[1]
+         guide_text = (
+         f"📘 **How to Pay with {coin}**\n\n"
+        "1️⃣ Open your crypto exchange or wallet app.\n"
+       f"2️⃣ Tap **Send** or **Withdraw** and choose **{coin}**.\n"
+        "3️⃣ Select the correct **Network** (Critical!).\n"
+        "4️⃣ Paste the exact Wallet Address from your invoice.\n"
+        "5️⃣ Add the **Memo/Tag** (ONLY if your invoice shows one).\n"
+        "6️⃣ Enter the exact amount, cover any network fees, and send.\n\n"
+        "⚠️ **IMPORTANT:** Always double-check the network and address before confirming. Crypto transfers cannot be reversed."
+    )
+    await query.message.reply_text(guide_text, parse_mode="Markdown")
 
     elif data == "book":
         kb = [[InlineKeyboardButton("Meet & Greet ($15k)", callback_data="type_meet")], [InlineKeyboardButton("Business ($20k)", callback_data="type_business")]]
