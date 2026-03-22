@@ -22,6 +22,8 @@ conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS wallets (coin TEXT PRIMARY KEY, address TEXT, memo TEXT)")
+# --- Added for Rejection Feature ---
+cursor.execute("CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, rej_msg TEXT)")
 conn.commit()
 
 def get_wallet(coin):
@@ -34,6 +36,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
+
+    # --- Admin Notification Feature ---
+    user = update.effective_user
+    username = f"@{user.username}" if user.username else "No Username"
+    if not is_admin(user_id):
+        for admin in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin,
+                    text=f"🔔 **New User Alert!**\nSomeone just started the bot.\n\n👤 **Name:** {user.first_name}\n🔗 **Username:** {username}\n🆔 **ID:** `{user_id}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
     keyboard = [[InlineKeyboardButton("🎯 Book Meeting", callback_data="book")]]
     if is_admin(user_id):
         keyboard.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_panel")])
@@ -57,6 +74,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Edit BTC", callback_data="manage_BTC")],
               [InlineKeyboardButton("Edit ETH", callback_data="manage_ETH")],
               [InlineKeyboardButton("Edit USDT", callback_data="manage_USDT")],
+              [InlineKeyboardButton("📝 Edit Rejection Msg", callback_data="set_rej_msg")],
               [InlineKeyboardButton("📢 Broadcast Message", callback_data="broadcast")]]
         await query.edit_message_text("🛠 **Admin Control Center**", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -83,6 +101,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("UPDATE wallets SET memo = NULL WHERE coin = ?", (coin,))
         conn.commit()
         await query.edit_message_text(f"✅ Memo for {coin} cleared.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"manage_{coin}")]]))
+
+    elif data == "set_rej_msg" and is_admin(user_id):
+        context.user_data["step"] = "setting_rej_msg"
+        await query.edit_message_text("📥 Send the new **Rejection Message** text:")
 
     elif data == "broadcast" and is_admin(user_id):
         context.user_data["step"] = "broadcasting"
@@ -157,7 +179,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("reject_") and is_admin(user_id):
         target = int(data.split("_")[1])
-        await context.bot.send_message(chat_id=target, text="❌ **Payment Not Received**\n\nWe were unable to verify your transaction. Please check your details and try again.", parse_mode="Markdown")
+        cursor.execute("SELECT rej_msg FROM settings WHERE id=1")
+        row = cursor.fetchone()
+        rej_txt = row[0] if row else "❌ **Payment Not Received**\n\nWe were unable to verify your transaction. Please check your details and try again."
+        await context.bot.send_message(chat_id=target, text=rej_txt, parse_mode="Markdown")
         await query.edit_message_text(f"❌ Rejected for {target}")
 
 # ================= HANDLERS =================
@@ -173,6 +198,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("UPDATE wallets SET memo = ? WHERE coin = ?", (text, coin))
         conn.commit()
         await update.message.reply_text(f"✅ {coin} {field} saved!")
+
+    elif is_admin(user_id) and context.user_data.get("step") == "setting_rej_msg":
+        context.user_data["step"] = None
+        cursor.execute("INSERT INTO settings (id, rej_msg) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET rej_msg=excluded.rej_msg", (text,))
+        conn.commit()
+        await update.message.reply_text("✅ New Rejection Message saved!")
 
     elif is_admin(user_id) and context.user_data.get("step") == "broadcasting":
         context.user_data["step"] = None
