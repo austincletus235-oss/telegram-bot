@@ -22,7 +22,6 @@ conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS wallets (coin TEXT PRIMARY KEY, address TEXT, memo TEXT)")
-# --- Added for Rejection Feature ---
 cursor.execute("CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, rej_msg TEXT)")
 conn.commit()
 
@@ -37,7 +36,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-    # --- Admin Notification Feature ---
     user = update.effective_user
     username = f"@{user.username}" if user.username else "No Username"
     if not is_admin(user_id):
@@ -63,13 +61,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    # COPY FEATURE
     if data.startswith("copy_"):
         val = data.replace("copy_", "")
         await query.message.reply_text(f"`{val}`", parse_mode="MarkdownV2")
         return
 
-    # ADMIN PANEL MAIN
     if data == "admin_panel" and is_admin(user_id):
         kb = [[InlineKeyboardButton("Edit BTC", callback_data="manage_BTC")],
               [InlineKeyboardButton("Edit ETH", callback_data="manage_ETH")],
@@ -78,7 +74,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
               [InlineKeyboardButton("📢 Broadcast Message", callback_data="broadcast")]]
         await query.edit_message_text("🛠 **Admin Control Center**", reply_markup=InlineKeyboardMarkup(kb))
 
-    # MANAGE COIN
     elif data.startswith("manage_") and is_admin(user_id):
         coin = data.split("_")[1]
         addr, memo = get_wallet(coin)
@@ -110,7 +105,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "broadcasting"
         await query.edit_message_text("📢 Send the message for ALL users:")
 
-    # USER UI
     elif data.startswith("guide_"):
         coin = data.split("_")[1]
         guide_text = (
@@ -136,6 +130,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("pay_"):
         coin = data.split("_")[1]
+        
+        # --- ADMIN PAYMENT NOTIFICATION ---
+        user = query.from_user
+        username = f"@{user.username}" if user.username else "No Username"
+        if not is_admin(user_id):
+            for admin in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin,
+                        text=f"💳 **Payment Activity!**\nUser: {user.first_name} ({username})\nAction: Viewing **{coin}** Invoice.",
+                        parse_mode="Markdown"
+                    )
+                except: pass
+        # ----------------------------------
+
         m_type = context.user_data.get("meeting_type", "Meet & Greet")
         price = 15000 if m_type == "Meet & Greet" else 20000
         addr, memo = get_wallet(coin)
