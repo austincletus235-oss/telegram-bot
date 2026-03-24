@@ -117,6 +117,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "dm_id"
         await query.edit_message_text("🆔 Send the **User ID** you want to message:")
 
+    # NEW: Quick Reply Button handler
+    elif data.startswith("reply_") and is_admin(user_id):
+        target = data.split("_")[1]
+        context.user_data["target_dm"] = target
+        context.user_data["step"] = "dm_msg"
+        await query.message.reply_text(f"📝 Now send your reply to user `{target}`:")
+
     elif data.startswith("manage_") and is_admin(user_id):
         coin = data.split("_")[1]
         addr, memo = get_wallet(coin)
@@ -180,7 +187,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price = p_meet if m_type == "Meet & Greet" else p_biz
         addr, memo = get_wallet(coin)
 
-        # --- BANK FAILSAFE: EXACT PHRASE ---
         if coin == "Bank" and addr == "NOT SET":
             await query.message.reply_text("Unavailable due to network issues.")
             return
@@ -267,13 +273,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["step"] = None
             await update.message.reply_text("📢 Broadcast sent!")
 
-    if step == "reason":
+    elif step == "reason":
         context.user_data["step"] = None
         kb = [[InlineKeyboardButton("BTC", callback_data="pay_BTC")], 
               [InlineKeyboardButton("ETH (Ethereum ERC20)", callback_data="pay_ETH")], 
               [InlineKeyboardButton("USDT (TRON TRC20)", callback_data="pay_USDT")],
               [InlineKeyboardButton("Bank Transfer", callback_data="pay_Bank")]]
         await update.message.reply_text("Choose payment method:", reply_markup=InlineKeyboardMarkup(kb))
+    
+    # NEW: Forward any regular text from users directly to Admin
+    elif not is_admin(user_id):
+        user = update.effective_user
+        username = f"@{user.username}" if user.username else "No Username"
+        for admin in ADMIN_IDS:
+            try:
+                kb = [[InlineKeyboardButton("↩️ Reply", callback_data=f"reply_{user_id}")]]
+                await context.bot.send_message(
+                    chat_id=admin, 
+                    text=f"📩 **New Message**\n👤 {user.first_name} ({username})\n🆔 `{user_id}`\n\n💬 {text}",
+                    reply_markup=InlineKeyboardMarkup(kb),
+                    parse_mode="Markdown"
+                )
+            except: pass
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
